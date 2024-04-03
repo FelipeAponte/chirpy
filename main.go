@@ -5,31 +5,35 @@ import (
 	"net/http"
 )
 
-func middlewareCors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+type apiConfig struct {
+	fileserverHits int
+}
+
+func newApiConfig() *apiConfig {
+	return &apiConfig{fileserverHits: 0}
 }
 
 func main() {
+	const filePathRoot = "."
+	const port = "8080"
+
 	mux := http.NewServeMux()
+
+	apiCfg := newApiConfig()
+	mux.Handle("GET /app/", apiCfg.middlewareMetricsInc(
+		http.StripPrefix("/app/", http.FileServer(http.Dir("."))),
+	))
+	mux.HandleFunc("GET /api/healthz", healthzHandler)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.getMetrics)
+	mux.HandleFunc("GET /api/reset", apiCfg.resetMetrics)
+
 	corsMux := middlewareCors(mux)
-	mux.Handle("/", &testHandler{})
 
-	if err := http.ListenAndServe(":8080", corsMux); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: corsMux,
 	}
-}
 
-type testHandler struct{}
-
-func (t *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotFound)
+	log.Printf("Serving files from %s on port: %s\n", filePathRoot, port)
+	log.Fatal(srv.ListenAndServe())
 }
